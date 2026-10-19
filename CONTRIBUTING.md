@@ -1,94 +1,215 @@
-<!-- gen:toc -->
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════════════════
+# NEXUS STRATEGIC BROWSER - INSTALLATION & ARCHITECTURE
+# Objectif : Préparer le terrain pour un navigateur plus rapide que Chrome
+# Stack : Rust (Tauri) + WebKitGTK + Frontend Local
+# Auteur : Aissa Mohammedi (DGK) - NEXUS-OPEN-3.0
+# ═══════════════════════════════════════════════════════════════════════════════
 
-- [How to Contribute](#how-to-contribute)
-  - [Contributor License Agreement](#contributor-license-agreement)
-  - [Getting Code](#getting-code)
-  - [Code reviews](#code-reviews)
-  - [Code Style](#code-style)
-  - [Adding New Dependencies](#adding-new-dependencies)
-  - [Running & Writing Tests](#running--writing-tests)
-  <!-- gen:stop -->
+set -euo pipefail
 
-# How to Contribute
+readonly C_R='\033[1;31m'
+readonly C_G='\033[1;32m'
+readonly C_Y='\033[1;33m'
+readonly C_C='\033[1;36m'
+readonly C_M='\033[1;35m'
+readonly C_N='\033[0m'
 
-First of all, thank you for your interest in Rendertron!
-We'd love to accept your patches and contributions!
+echo -e "${C_M}╔══════════════════════════════════════════════════════════════╗${C_N}"
+echo -e "${C_M}║   NEXUS STRATEGIC BROWSER - DÉPLOIEMENT                       ║${C_N}"
+echo -e "${C_M}╚══════════════════════════════════════════════════════════════╝${C_N}"
 
-## Contributor License Agreement
+# ==============================================================================
+# 1. INSTALLATION DES PACKAGES STRATÉGIQUES (Lignes 20-50)
+# ==============================================================================
 
-Contributions to this project must be accompanied by a Contributor License
-Agreement. You (or your employer) retain the copyright to your contribution,
-this simply gives us permission to use and redistribute your contributions as
-part of the project. Head over to <https://cla.developers.google.com/> to see
-your current agreements on file or to sign a new one.
+echo -e "\n${C_C}[1/4] Installation des packages système...${C_N}"
 
-You generally only need to submit a CLA once, so if you've already submitted one
-(even if it was for a different project), you probably don't need to do it
-again.
+# Mise à jour des dépôts
+sudo apt-get update -qq
 
-## Getting Code
+# Packages de compilation et de rendu (WebKitGTK 4.1 = le plus récent)
+sudo apt-get install -y -qq \
+    build-essential \
+    curl \
+    wget \
+    file \
+    libssl-dev \
+    libgtk-3-dev \
+    libwebkit2gtk-4.1-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev \
+    patchelf \
+    libjavascriptcoregtk-4.1-dev \
+    gir1.2-webkit2-4.1 \
+    sqlite3 \
+    jq \
+    rsync
 
-1. Clone this repository
+echo -e "${C_G}[OK] Packages système installés.${C_N}"
 
-```bash
-git clone https://github.com/GoogleChrome/rendertron
-cd rendertron
-```
+# Installation de Rust (Le moteur du navigateur)
+if ! command -v rustc &>/dev/null; then
+    echo -e "${C_Y}[*] Installation de Rust (Cargo)...${C_N}"
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    source "$HOME/.cargo/env"
+else
+    echo -e "${C_G}[OK] Rust est déjà installé.${C_N}"
+fi
 
-2. Install dependencies
+# Installation de Node.js (Pour le frontend si nécessaire)
+if ! command -v node &>/dev/null; then
+    echo -e "${C_Y}[*] Installation de Node.js...${C_N}"
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    sudo apt-get install -y -qq nodejs
+else
+    echo -e "${C_G}[OK] Node.js est déjà installé.${C_N}"
+fi
 
-```bash
-npm install
-```
+# Installation de Tauri CLI (Le framework d'application)
+if ! command -v cargo-tauri &>/dev/null; then
+    echo -e "${C_Y}[*] Installation de Tauri CLI...${C_N}"
+    cargo install tauri-cli
+fi
 
-3. Run tests locally. For more information about tests, read [Running & Writing Tests](#running--writing-tests).
+# ==============================================================================
+# 2. CRÉATION DE L'ARBORESCENCE (Paths Spéciaux) (Lignes 51-100)
+# ==============================================================================
 
-```bash
-npm test
-```
+echo -e "\n${C_C}[2/4] Création des paths stratégiques...${C_N}"
 
-4. (Optional) when developing cache related stuff you will need `npm run test-cache` commands for tests.
-   - This requires the Google Cloud SDK, follow the steps described [here](https://cloud.google.com/sdk/docs/#install_the_latest_cloud_tools_version_cloudsdk_current_version) to install
-   - run `gcloud components install beta cloud-datastore-emulator`
-   - if you do not have Java 8+ JRE installed, you should install it too, as the Google Cloud Datastore emulator requires it
+BROWSER_DIR="$HOME/NexusBrowser"
+mkdir -p "$BROWSER_DIR"/{src-tauri,src,public,assets,data,cache,logs}
 
-## Code reviews
+cd "$BROWSER_DIR"
 
-All submissions, including submissions by project members, require review. We
-use GitHub pull requests for this purpose. Consult
-[GitHub Help](https://help.github.com/articles/about-pull-requests/) for more
-information on using pull requests.
+# Création du fichier de configuration Tauri
+cat << 'EOF' > src-tauri/Cargo.toml
+[package]
+name = "nexus-browser"
+version = "1.0.0"
+description = "Nexus Strategic Browser"
+authors = ["Aissa Mohammedi (DGK)"]
+edition = "2021"
 
-## Code Style
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
 
-- Coding style is fully defined in [tslint.json](https://github.com/GoogleChrome/rendertron/blob/master/tslint.json)
-- Comments should be generally avoided. If the code would not be understood without comments, consider re-writing the code to make it self-explanatory.
+[dependencies]
+tauri = { version = "1.5", features = ["shell-open"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+EOF
 
-To run code linter, use:
+# Création du fichier de configuration principal Tauri
+cat << 'EOF' > src-tauri/tauri.conf.json
+{
+  "build": {
+    "beforeBuildCommand": "",
+    "beforeDevCommand": "",
+    "devPath": "../src",
+    "distDir": "../src"
+  },
+  "package": {
+    "productName": "NexusBrowser",
+    "version": "1.0.0"
+  },
+  "tauri": {
+    "allowlist": {
+      "shell": {
+        "all": true,
+        "open": true
+      }
+    },
+    "bundle": {
+      "active": true,
+      "targets": "all",
+      "identifier": "com.nexus.browser"
+    },
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: https:; script-src 'self'"
+    },
+    "windows": [
+      {
+        "fullscreen": false,
+        "height": 800,
+        "resizable": true,
+        "title": "Nexus Browser",
+        "width": 1280
+      }
+    ]
+  }
+}
+EOF
 
-```bash
-npm run lint
-```
+echo -e "${C_G}[OK] Arborescence et configuration Tauri créées dans $BROWSER_DIR.${C_N}"
 
-## Adding New Dependencies
+# ==============================================================================
+# 3. GÉNÉRATION DU CODE SOURCE (Rust + HTML) (Lignes 101-150)
+# ==============================================================================
 
-For all dependencies (both installation and development):
+echo -e "\n${C_C}[3/4] Génération du code source...${C_N}"
 
-- **Do not add** a dependency if the desired functionality is easily implementable.
-- If adding a dependency, it should be well-maintained and trustworthy.
+# Code Rust (Point d'entrée)
+cat << 'EOF' > src-tauri/src/main.rs
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-A barrier for introducing new installation dependencies is especially high:
+fn main() {
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![search_web])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
 
-- **Do not add** installation dependency unless it's critical to project success.
+#[tauri::command]
+fn search_web(query: String) -> String {
+    // Ici, on pourrait appeler l'API Nexus sur le port 8190
+    // Pour l'instant, on redirige vers une recherche locale
+    format!("https://duckduckgo.com/?q={}", query)
+}
+EOF
 
-## Running & Writing Tests
+# Interface HTML (Frontend ultra-léger)
+cat << 'EOF' > src/index.html
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Nexus Browser</title>
+    <style>
+        body { margin: 0; background: #0a0a0f; color: #fff; font-family: monospace; display: flex; flex-direction: column; height: 100vh; }
+        .bar { display: flex; padding: 10px; background: #151520; border-bottom: 1px solid #333; }
+        input { flex: 1; padding: 10px; background: #000; border: 1px solid #00f3ff; color: #00f3ff; border-radius: 5px; outline: none; }
+        button { padding: 10px 20px; margin-left: 10px; background: #00f3ff; color: #000; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; }
+        iframe { flex: 1; border: none; width: 100%; }
+    </style>
+</head>
+<body>
+    <div class="bar">
+        <input type="text" id="url" value="https://duckduckgo.com" onkeypress="if(event.key==='Enter') loadPage()">
+        <button onclick="loadPage()">GO</button>
+    </div>
+    <iframe id="frame" src="https://duckduckgo.com"></iframe>
 
-- Every feature should be accompanied by a test.
-- Tests should be _hermetic_. Tests should not depend on external services unless absolutely needed.
-- Tests should work on all three platforms: Mac, Linux and Windows.
+    <script>
+        function loadPage() {
+            const url = document.getElementById('url').value;
+            document.getElementById('frame').src = url;
+        }
+    </script>
+</body>
+</html>
+EOF
 
-- To run all tests:
+echo -e "${C_G}[OK] Code source généré.${C_N}"
 
-```bash
-npm test
-```
+# ==============================================================================
+# 4. LANCEMENT (Lignes 151-200)
+# ==============================================================================
+
+echo -e "\n${C_C}[4/4] Compilation et lancement...${C_N}"
+echo -e "${C_Y}Note : La première compilation peut prendre 2 à 3 minutes.${C_N}"
+
+# Lancement de Tauri en mode dev (compilation + ouverture de la fenêtre)
+cd "$BROWSER_DIR"
+cargo tauri dev
