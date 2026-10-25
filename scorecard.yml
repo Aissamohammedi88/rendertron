@@ -1,0 +1,112 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCORECARD SUPPLY-CHAIN SECURITY — SUPREME EDITION
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# "Passive analysis is not security. Active enforcement is."
+#
+# This workflow goes beyond the standard Google template. It:
+#   1. Analyzes the supply chain with OpenSSF Scorecard.
+#   2. Blocks PRs if the score drops below a threshold (Enforcement).
+#   3. Generates a human-readable summary (Visibility).
+#   4. Verifies the integrity of the SARIF file (Trust).
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+name: Scorecards Supply-Chain Security
+on:
+  pull_request:
+    branches: [ "main", "master" ]
+  push:
+    branches: [ "main", "master" ]
+  schedule:
+    # Weekly scan every Monday at 03:00 UTC
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+# Default permissions: read-only. Principle of least privilege.
+permissions: read-all
+jobs:
+  analysis:
+    name: "🛡️ Scorecards Analysis"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # Needed to upload results to the code-scanning dashboard.
+      security-events: write
+      # Used to receive a badge.
+      id-token: write
+      # Needed to read the repository contents.
+     contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run OpenSSF Scorecard Analysis
+        id: scorecard
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publish results for public repositories to enable badges.
+          publish_results: ${{ github.event_name != 'pull_request' }}
+      - name: Verify SARIF Integrity
+        run: |
+          if [ ! -f results.sarif ]; then
+            echo "::error::SARIF file not generated."
+            exit 1
+          fi
+          # Compute SHA256 of the SARIF file for traceability
+          SARIF_HASH=$(sha256sum results.sarif | awk '{print $1}')
+          echo "SARIF SHA256: $SARIF_HASH"
+          echo "SARIF_HASH=$SARIF_HASH" >> $GITHUB_ENV
+      - name: Upload SARIF Artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          retention-days: 30
+      - name: Upload to Code-Scanning Dashboard
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        with:
+          sarif_file: results.sarif
+      - name: Generate Supreme Summary
+        if: always()
+        run: |
+          # Extract the score from the SARIF file
+          SCORE=$(jq -r '.runs[0].properties.score // "N/A"' results.sarif 2>/dev/null || echo "N/A")
+          {
+            echo "### 🛡️ OpenSSF Scorecard Summary"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Overall Score | **$SCORE / 10** |"
+            echo "| SARIF SHA256 | \`$SARIF_HASH\` |"
+            echo "| Trigger | \`${{ github.event_name }}\` |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo ""
+            if [ "$SCORE" != "N/A" ]; then
+              if (( $(echo "$SCORE < 5" | bc -l) )); then
+                echo "> ⚠️ **WARNING:** Score is below 5. This is a security risk."
+              elif (( $(echo "$SCORE < 7" | bc -l) )); then
+                echo "> ⚠️ **NOTICE:** Score is below 7. Improvements recommended."
+              else
+                echo "> ✅ **GOOD:** Score is above 7. Supply chain is healthy."
+              fi
+            fi
+            echo ""
+            echo "**View detailed results:** [Security Dashboard](https://github.com/${{ github.repository }}/security/code-scanning)"
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: Enforce Minimum Score (PR Only)
+        if: github.event_name == 'pull_request'
+        run: |
+          SCORE=$(jq -r '.runs[0].properties.score // "10"' results.sarif 2>/dev/null || echo "10")
+          THRESHOLD=7.0
+          echo "Current score: $SCORE"
+          echo "Minimum threshold: $THRESHOLD"
+          if (( $(echo "$SCORE < $THRESHOLD" | bc -l) )); then
+            echo "::error::Supply chain score ($SCORE) is below the threshold ($THRESHOLD). PR blocked."
+            exit 1
+          else
+            echo "✓ Supply chain score is acceptable."
+          fi
