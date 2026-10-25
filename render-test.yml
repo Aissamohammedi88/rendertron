@@ -1,0 +1,18 @@
+# .github/workflows/render-test.yml
+# Teste le rendu de ton application avec Playwright (moderne, maintenu)
+name: Render Test
+on: [push, pull_request]
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Playwright
+        run: npx playwright install --with-deps chromiu
+      - name: Test Rendering
+        run: |
+          npx playwright test
